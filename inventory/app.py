@@ -154,6 +154,10 @@ def get_warehouse_data(
 
 
 def update_warehouse_data(conn: sqlite3.Connection):
+    # Define secure whitelisted values for SQL query construction
+    ALLOWED_COLUMNS = {"to_loc_id", "from_loc_id"}
+    ALLOWED_OPERATIONS = {"+", "-"}
+    
     update_unallocated_quantity = False
     prod_name, from_loc, to_loc, quantity = (
         request.form["prod_name"],
@@ -189,16 +193,39 @@ def update_warehouse_data(conn: sqlite3.Connection):
         )
 
     if update_unallocated_quantity:
-        conn.execute(
-            f"INSERT INTO logistics (prod_id, {column_name}, prod_quantity) "
-            "SELECT products.prod_id, location.loc_id, ? FROM products, location "
-            "WHERE products.prod_name = ? AND location.loc_name = ?",
-            (quantity, prod_name, location_name),
-        )
-        conn.execute(
-            f"UPDATE products SET unallocated_quantity = unallocated_quantity {operation} ? WHERE prod_name = ?",
-            (quantity, prod_name),
-        )
+        # Validate that column_name and operation are from our secure whitelist
+        if column_name not in ALLOWED_COLUMNS:
+            raise ValueError(f"Invalid column name: {column_name}")
+        if operation not in ALLOWED_OPERATIONS:
+            raise ValueError(f"Invalid operation: {operation}")
+        
+        # Use separate queries for each allowed column to avoid f-string interpolation
+        if column_name == "to_loc_id":
+            conn.execute(
+                "INSERT INTO logistics (prod_id, to_loc_id, prod_quantity) "
+                "SELECT products.prod_id, location.loc_id, ? FROM products, location "
+                "WHERE products.prod_name = ? AND location.loc_name = ?",
+                (quantity, prod_name, location_name),
+            )
+        elif column_name == "from_loc_id":
+            conn.execute(
+                "INSERT INTO logistics (prod_id, from_loc_id, prod_quantity) "
+                "SELECT products.prod_id, location.loc_id, ? FROM products, location "
+                "WHERE products.prod_name = ? AND location.loc_name = ?",
+                (quantity, prod_name, location_name),
+            )
+        
+        # Use separate queries for each allowed operation to avoid f-string interpolation
+        if operation == "-":
+            conn.execute(
+                "UPDATE products SET unallocated_quantity = unallocated_quantity - ? WHERE prod_name = ?",
+                (quantity, prod_name),
+            )
+        elif operation == "+":
+            conn.execute(
+                "UPDATE products SET unallocated_quantity = unallocated_quantity + ? WHERE prod_name = ?",
+                (quantity, prod_name),
+            )
 
 
 def get_warehouse_map(log_summary: list):
