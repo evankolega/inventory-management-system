@@ -50,8 +50,10 @@ def init_database():
     )
 
     with sqlite3.connect(DATABASE_NAME) as conn:
-        for table_definition in [PRODUCTS, LOCATIONS, LOGISTICS]:
-            conn.execute(f"CREATE TABLE IF NOT EXISTS {table_definition}")
+        # Create tables using individual statements for better security
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {PRODUCTS}")
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {LOCATIONS}")
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {LOGISTICS}")
         conn.execute(
             "CREATE TRIGGER IF NOT EXISTS default_prod_qty_to_unalloc_qty "
             "AFTER INSERT ON products FOR EACH ROW WHEN NEW.unallocated_quantity IS NULL "
@@ -154,7 +156,6 @@ def get_warehouse_data(
 
 
 def update_warehouse_data(conn: sqlite3.Connection):
-    update_unallocated_quantity = False
     prod_name, from_loc, to_loc, quantity = (
         request.form["prod_name"],
         request.form["from_loc"],
@@ -164,17 +165,35 @@ def update_warehouse_data(conn: sqlite3.Connection):
 
     # if no 'from loc' is given, that means the product is being shipped to a warehouse (init condition)
     if from_loc in EMPTY_SYMBOLS:
-        column_name = "to_loc_id"
-        operation = "-"
         location_name = to_loc
-        update_unallocated_quantity = True
+        # Use parameterized query for inserting logistics record
+        conn.execute(
+            "INSERT INTO logistics (prod_id, to_loc_id, prod_quantity) "
+            "SELECT products.prod_id, location.loc_id, ? FROM products, location "
+            "WHERE products.prod_name = ? AND location.loc_name = ?",
+            (quantity, prod_name, location_name),
+        )
+        # Use parameterized query for updating unallocated quantity (subtract)
+        conn.execute(
+            "UPDATE products SET unallocated_quantity = unallocated_quantity - ? WHERE prod_name = ?",
+            (quantity, prod_name),
+        )
 
     # To Location wasn't specified, will be unallocated
     elif to_loc in EMPTY_SYMBOLS:
-        column_name = "from_loc_id"
-        operation = "+"
         location_name = from_loc
-        update_unallocated_quantity = True
+        # Use parameterized query for inserting logistics record
+        conn.execute(
+            "INSERT INTO logistics (prod_id, from_loc_id, prod_quantity) "
+            "SELECT products.prod_id, location.loc_id, ? FROM products, location "
+            "WHERE products.prod_name = ? AND location.loc_name = ?",
+            (quantity, prod_name, location_name),
+        )
+        # Use parameterized query for updating unallocated quantity (add)
+        conn.execute(
+            "UPDATE products SET unallocated_quantity = unallocated_quantity + ? WHERE prod_name = ?",
+            (quantity, prod_name),
+        )
 
     # if 'from loc' and 'to_loc' given the product is being shipped between warehouses
     else:
@@ -186,18 +205,6 @@ def update_warehouse_data(conn: sqlite3.Connection):
             "(SELECT loc_id FROM location WHERE loc_name = ?) as to_loc_id, "
             "(SELECT ? as prod_quantity) as prod_quantity",
             (prod_name, from_loc, to_loc, quantity),
-        )
-
-    if update_unallocated_quantity:
-        conn.execute(
-            f"INSERT INTO logistics (prod_id, {column_name}, prod_quantity) "
-            "SELECT products.prod_id, location.loc_id, ? FROM products, location "
-            "WHERE products.prod_name = ? AND location.loc_name = ?",
-            (quantity, prod_name, location_name),
-        )
-        conn.execute(
-            f"UPDATE products SET unallocated_quantity = unallocated_quantity {operation} ? WHERE prod_name = ?",
-            (quantity, prod_name),
         )
 
 
