@@ -279,7 +279,7 @@ def delete():
             case "product":
                 product_id = request.args.get("prod_id")
                 if product_id:
-                    conn.execute("DELETE FROM products WHERE prod_id = ?", product_id)
+                    conn.execute("DELETE FROM products WHERE prod_id = ?", (product_id,))
                 return redirect(VIEWS["Stock"])
 
             case "location":
@@ -308,7 +308,7 @@ def delete():
                             "UPDATE products SET unallocated_quantity = unallocated_quantity + ? WHERE prod_id = ?",
                             (displaced_qty[products_], products_),
                         )
-                    conn.execute("DELETE FROM location WHERE loc_id = ?", location_id)
+                    conn.execute("DELETE FROM location WHERE loc_id = ?", (location_id,))
                 return redirect(VIEWS["Warehouses"])
 
             case _:
