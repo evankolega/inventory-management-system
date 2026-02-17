@@ -18,6 +18,47 @@ VIEWS = {
 }
 EMPTY_SYMBOLS = {"", " ", None}
 
+# Validation constants for numeric fields
+MAX_QUANTITY = 2_147_483_647  # SQLite INTEGER max value
+
+
+def validate_positive_integer(value: str, field_name: str = "quantity", max_value: int = MAX_QUANTITY) -> int:
+    """
+    Validate that a string value represents a positive integer within acceptable range.
+    
+    Args:
+        value: The string value to validate
+        field_name: Name of the field for error messages
+        max_value: Maximum allowed value (default: SQLite INTEGER max)
+    
+    Returns:
+        The validated integer value
+    
+    Raises:
+        ValueError: If the value is not a valid positive integer within range
+    """
+    if value is None or str(value).strip() == "":
+        raise ValueError(f"{field_name} is required")
+    
+    value_str = str(value).strip()
+    
+    # Check for valid integer format (no decimals, no special characters)
+    if not value_str.lstrip('-').isdigit():
+        raise ValueError(f"{field_name} must be a valid integer")
+    
+    try:
+        int_value = int(value_str)
+    except (ValueError, OverflowError):
+        raise ValueError(f"{field_name} must be a valid integer")
+    
+    if int_value <= 0:
+        raise ValueError(f"{field_name} must be a positive integer greater than zero")
+    
+    if int_value > max_value:
+        raise ValueError(f"{field_name} exceeds maximum allowed value of {max_value}")
+    
+    return int_value
+
 app = Flask(__name__)
 
 if os.environ.get("FLASK_DEBUG") == "1":
@@ -83,17 +124,22 @@ def summary():
 
 @app.route("/product", methods=["POST", "GET"])
 def product():
+    error_message = None
     with sqlite3.connect(DATABASE_NAME) as conn:
         if request.method == "POST":
-            prod_name, quantity = request.form["prod_name"], request.form["prod_quantity"]
-            transaction_allowed = prod_name not in EMPTY_SYMBOLS and quantity not in EMPTY_SYMBOLS
-
-            if transaction_allowed:
-                conn.execute(
-                    "INSERT INTO products (prod_name, prod_quantity) VALUES (?, ?)",
-                    (prod_name, quantity),
-                )
-                return redirect(VIEWS["Stock"])
+            prod_name = request.form.get("prod_name", "")
+            quantity_str = request.form.get("prod_quantity", "")
+            
+            if prod_name not in EMPTY_SYMBOLS and quantity_str not in EMPTY_SYMBOLS:
+                try:
+                    validated_quantity = validate_positive_integer(quantity_str, "Product quantity")
+                    conn.execute(
+                        "INSERT INTO products (prod_name, prod_quantity) VALUES (?, ?)",
+                        (prod_name, validated_quantity),
+                    )
+                    return redirect(VIEWS["Stock"])
+                except ValueError as e:
+                    error_message = str(e)
 
         products = conn.execute("SELECT * FROM products").fetchall()
 
@@ -102,6 +148,7 @@ def product():
         link=VIEWS,
         products=products,
         title="Stock",
+        error=error_message,
     )
 
 
@@ -154,17 +201,24 @@ def get_warehouse_data(
 
 
 def update_warehouse_data(conn: sqlite3.Connection):
+    """
+    Update warehouse data based on logistics movement.
+    
+    Raises:
+        ValueError: If quantity validation fails
+    """
     # Define secure whitelisted values for SQL query construction
     ALLOWED_COLUMNS = {"to_loc_id", "from_loc_id"}
     ALLOWED_OPERATIONS = {"+", "-"}
     
     update_unallocated_quantity = False
-    prod_name, from_loc, to_loc, quantity = (
-        request.form["prod_name"],
-        request.form["from_loc"],
-        request.form["to_loc"],
-        request.form["quantity"],
-    )
+    prod_name = request.form.get("prod_name", "")
+    from_loc = request.form.get("from_loc", "")
+    to_loc = request.form.get("to_loc", "")
+    quantity_str = request.form.get("quantity", "")
+    
+    # Validate quantity is a positive integer
+    quantity = validate_positive_integer(quantity_str, "Movement quantity")
 
     # if no 'from loc' is given, that means the product is being shipped to a warehouse (init condition)
     if from_loc in EMPTY_SYMBOLS:
@@ -266,8 +320,28 @@ def movement():
 
         case "POST":
             with sqlite3.connect(DATABASE_NAME) as conn:
-                update_warehouse_data(conn)
-                return redirect(VIEWS["Logistics"])
+                try:
+                    update_warehouse_data(conn)
+                    return redirect(VIEWS["Logistics"])
+                except ValueError as e:
+                    logistics_data = conn.execute("SELECT * FROM logistics").fetchall()
+                    products = conn.execute(
+                        "SELECT prod_id, prod_name, unallocated_quantity FROM products"
+                    ).fetchall()
+                    locations = conn.execute("SELECT loc_id, loc_name FROM location").fetchall()
+                    warehouse_summary = get_warehouse_data(conn, products, locations)
+                    item_location_qty_map = get_warehouse_map(warehouse_summary)
+                    return render_template(
+                        "movement.jinja",
+                        title="Logistics",
+                        link=VIEWS,
+                        products=products,
+                        locations=locations,
+                        allocated=item_location_qty_map,
+                        logistics=logistics_data,
+                        summary=warehouse_summary,
+                        error=str(e),
+                    )
 
 
 @app.route("/delete")
@@ -330,25 +404,28 @@ def edit():
                 return redirect(VIEWS["Warehouses"])
 
             case "product":
-                prod_id, prod_name, prod_quantity = (
-                    request.form["prod_id"],
-                    request.form["prod_name"],
-                    request.form["prod_quantity"],
-                )
+                prod_id = request.form.get("prod_id", "")
+                prod_name = request.form.get("prod_name", "")
+                prod_quantity_str = request.form.get("prod_quantity", "")
 
                 if prod_name:
                     conn.execute(
                         "UPDATE products SET prod_name = ? WHERE prod_id = ?",
                         (prod_name, prod_id),
                     )
-                if prod_quantity:
-                    old_prod_quantity = conn.execute(
-                        "SELECT prod_quantity FROM products WHERE prod_id = ?", (prod_id,)
-                    ).fetchone()[0]
-                    conn.execute(
-                        "UPDATE products SET prod_quantity = ?, unallocated_quantity =  unallocated_quantity + ? - ? WHERE prod_id = ?",
-                        (prod_quantity, prod_quantity, old_prod_quantity, prod_id),
-                    )
+                if prod_quantity_str and prod_quantity_str not in EMPTY_SYMBOLS:
+                    try:
+                        validated_quantity = validate_positive_integer(prod_quantity_str, "Product quantity")
+                        old_prod_quantity = conn.execute(
+                            "SELECT prod_quantity FROM products WHERE prod_id = ?", (prod_id,)
+                        ).fetchone()[0]
+                        conn.execute(
+                            "UPDATE products SET prod_quantity = ?, unallocated_quantity =  unallocated_quantity + ? - ? WHERE prod_id = ?",
+                            (validated_quantity, validated_quantity, old_prod_quantity, prod_id),
+                        )
+                    except ValueError:
+                        # Invalid quantity provided, skip the quantity update
+                        pass
 
                 return redirect(VIEWS["Stock"])
 
