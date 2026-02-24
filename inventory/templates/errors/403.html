@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Denied - Inventory Manager</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #dc3545 0%, #a71e2a 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            font-family: 'Arial', sans-serif;
+        }
+        .error-container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            padding: 3rem;
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+        .error-code {
+            font-size: 6rem;
+            font-weight: bold;
+            color: #dc3545;
+            margin-bottom: 0;
+        }
+        .error-message {
+            color: #666;
+            margin-bottom: 2rem;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="error-container">
+                    <h1 class="error-code">403</h1>
+                    <h2 class="h4 mb-3">Access Denied</h2>
+                    <p class="error-message">
+                        You don't have permission to access this resource. This usually happens when:
+                    </p>
+                    <ul class="text-start mb-4">
+                        <li>Invalid or missing CSRF token</li>
+                        <li>Session has expired</li>
+                        <li>Insufficient permissions</li>
+                    </ul>
+                    <div class="d-flex gap-2 justify-content-center">
+                        {% if current_user %}
+                            <a href="{{ url_for('summary') }}" class="btn btn-primary">
+                                <i class="fas fa-home"></i> Go Home
+                            </a>
+                            <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary">
+                                <i class="fas fa-sign-out-alt"></i> Logout
+                            </a>
+                        {% else %}
+                            <a href="{{ url_for('login') }}" class="btn btn-primary">
+                                <i class="fas fa-sign-in-alt"></i> Login
+                            </a>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="mt-4">
+                        <small class="text-muted">
+                            <strong>Security Notice:</strong> If you believe this is an error, 
+                            please try logging out and back in.
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

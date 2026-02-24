@@ -48,13 +48,49 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarSupportedContent">
                 <ul class="navbar-nav mr-auto bg-dark alert-light">{{ title }}</ul>
-                {% for k, v in link|items %}
-                <div class="col-auto">
-                  <button class="btn btn-primary" onclick="location.href='{{ v }}'" {{ 'disabled' if k == title }}>{{ k }}</button>
+                
+                <!-- Navigation Links (only show if authenticated) -->
+                {% if current_user %}
+                    {% for k, v in link|items %}
+                    <div class="col-auto">
+                      <button class="btn btn-primary" onclick="location.href='{{ v }}'" {{ 'disabled' if k == title }}>{{ k }}</button>
+                    </div>
+                    {% endfor %}
+                {% endif %}
+                
+                <!-- User Authentication -->
+                <div class="navbar-nav ms-auto">
+                    {% if current_user %}
+                        <span class="navbar-text me-3">
+                            <i class="fas fa-user"></i> {{ current_user.username }}
+                        </span>
+                        <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </a>
+                    {% else %}
+                        <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-sm me-2">Login</a>
+                        <a href="{{ url_for('register') }}" class="btn btn-light btn-sm">Register</a>
+                    {% endif %}
                 </div>
-                {% endfor %}
             </div>
 	    </nav>
+        
+        <!-- Flash Messages -->
+        <div class="container" style="padding-top: 20px;">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{% if category == 'error' %}danger{% elif category == 'warning' %}warning{% elif category == 'success' %}success{% else %}info{% endif %} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close">
+                                <span aria-hidden="true">&times;</span>
+                            </button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </div>
+        
         {% block content %}
         {% endblock %}
     </body>

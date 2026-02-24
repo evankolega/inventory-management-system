@@ -12,42 +12,49 @@
                 <tr>
                     <td>{{ product[0] }}</td><td>{{ product[1] }}</td><td>{{ product[2] }}</td>
                     <td>
-                        <a href="{{ url_for('delete', prod_id=product[0], type='product') }}">
-                            <button name="button" type="button" class="btn btn-danger" value= "delete" >delete</button><br>
-                        </a>
+                        <!-- SECURE DELETE: Use POST form instead of GET link -->
+                        <form method="POST" action="{{ url_for('delete') }}" style="display: inline;" 
+                              onsubmit="return confirm('Are you sure you want to delete this product?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="type" value="product">
+                            <input type="hidden" name="prod_id" value="{{ product[0] }}">
+                            <button type="submit" class="btn btn-danger">Delete</button>
+                        </form>
                     </td>
                     <td>
                         <button name="button" type="button" class="btn btn-success" value= "edit" data-toggle="modal" data-target="#edit_{{ product[0] }}" >edit</button><br>
                         <div id="edit_{{ product[0] }}" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="trans_message" aria-hidden="true">
                             <form action="{{ url_for('edit', type='product') }}" method="post" class="base_form">
-                            <div class="modal-dialog" role="document">
-                                <div class="modal-content">
-                                    <div class="modal-body"><input name="prod_name" placeholder="{{ product[1] }}"></div>
-                                    <div class="modal-body">
-                                        <input name="prod_quantity" placeholder="{{ product[2] }}" id="input_{{ product[0] }}" type="number">
-                                        <script>
-                                            document.getElementById("input_{{ product[0] }}").oninput = function(){
-                                                let all = document.getElementsByClassName("btn btn-primary");
-                                                for(let i=0;i<all.length;i++){
-                                                    all[i].disabled = true;
-                                                }
-                                                let in_qty = parseInt(document.getElementById("input_{{ product[0] }}").value);
-                                                if (in_qty > {{ product[2] }}){
+                                <!-- CSRF Protection -->
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <div class="modal-dialog" role="document">
+                                    <div class="modal-content">
+                                        <div class="modal-body"><input name="prod_name" placeholder="{{ product[1] }}"></div>
+                                        <div class="modal-body">
+                                            <input name="prod_quantity" placeholder="{{ product[2] }}" id="input_{{ product[0] }}" type="number">
+                                            <script>
+                                                document.getElementById("input_{{ product[0] }}").oninput = function(){
+                                                    let all = document.getElementsByClassName("btn btn-primary");
                                                     for(let i=0;i<all.length;i++){
-                                                        all[i].disabled = false;
+                                                        all[i].disabled = true;
                                                     }
-                                                }
-                                            };
-                                        </script>
-                                        <text class="font-weight-light">(only increase count)</text>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <input name="prod_id" value="{{ product[0] }}" hidden aria-hidden="true">
-                                        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
-                                            <button type="submit" class="btn btn-primary">Save changes</button>
+                                                    let in_qty = parseInt(document.getElementById("input_{{ product[0] }}").value);
+                                                    if (in_qty > {{ product[2] }}){
+                                                        for(let i=0;i<all.length;i++){
+                                                            all[i].disabled = false;
+                                                        }
+                                                    }
+                                                };
+                                            </script>
+                                            <text class="font-weight-light">(only increase count)</text>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <input name="prod_id" value="{{ product[0] }}" hidden aria-hidden="true">
+                                            <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                                                <button type="submit" class="btn btn-primary">Save changes</button>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
                             </form>
                         </div>
                     </td>
@@ -56,6 +63,7 @@
             <!-- Inserting data -->
             <tr>
                 <form action = "{{ url_for('product') }}" method = "POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <td></td>
                     <td><input name = "prod_name" placeholder="Product Name" required autofocus></td>
                     <td><input name = "prod_quantity" placeholder="Quantity" required></td>
