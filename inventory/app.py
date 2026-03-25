@@ -1,12 +1,13 @@
 # imports - standard imports
 import json
 import os
+import re
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
 # imports - third party imports
-from flask import Flask, redirect, render_template, request
+from flask import Flask, redirect, render_template, request, flash
 
 DATABASE_NAME = "inventory.sqlite"
 _DATABASE_PATH = Path(__file__).parent.parent / DATABASE_NAME
@@ -18,7 +19,76 @@ VIEWS = {
 }
 EMPTY_SYMBOLS = {"", " ", None}
 
+# Input validation constants
+MAX_NAME_LENGTH = 100
+MIN_NAME_LENGTH = 1
+MAX_QUANTITY = 999999
+MIN_QUANTITY = 1
+NAME_PATTERN = re.compile(r'^[a-zA-Z0-9\s\-_.,()]+$')
+
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-key-change-in-production')
+
+
+class ValidationError(Exception):
+    """Custom exception for input validation errors"""
+    pass
+
+
+def validate_name(name, field_name="Name"):
+    """Validate product and location names"""
+    if not name or name in EMPTY_SYMBOLS:
+        raise ValidationError(f"{field_name} is required")
+    
+    # Convert to string and strip whitespace
+    name = str(name).strip()
+    
+    if len(name) < MIN_NAME_LENGTH:
+        raise ValidationError(f"{field_name} must be at least {MIN_NAME_LENGTH} character(s)")
+    
+    if len(name) > MAX_NAME_LENGTH:
+        raise ValidationError(f"{field_name} must not exceed {MAX_NAME_LENGTH} characters")
+    
+    if not NAME_PATTERN.match(name):
+        raise ValidationError(f"{field_name} contains invalid characters. Only letters, numbers, spaces, hyphens, underscores, periods, commas, and parentheses are allowed")
+    
+    return name
+
+
+def validate_quantity(quantity, field_name="Quantity"):
+    """Validate quantity inputs"""
+    if not quantity or quantity in EMPTY_SYMBOLS:
+        raise ValidationError(f"{field_name} is required")
+    
+    # Convert to string first, then attempt integer conversion
+    try:
+        quantity_int = int(str(quantity).strip())
+    except (ValueError, TypeError):
+        raise ValidationError(f"{field_name} must be a valid number")
+    
+    if quantity_int < MIN_QUANTITY:
+        raise ValidationError(f"{field_name} must be at least {MIN_QUANTITY}")
+    
+    if quantity_int > MAX_QUANTITY:
+        raise ValidationError(f"{field_name} must not exceed {MAX_QUANTITY}")
+    
+    return quantity_int
+
+
+def validate_id(id_value, field_name="ID"):
+    """Validate ID inputs"""
+    if not id_value or id_value in EMPTY_SYMBOLS:
+        raise ValidationError(f"{field_name} is required")
+    
+    try:
+        id_int = int(str(id_value).strip())
+    except (ValueError, TypeError):
+        raise ValidationError(f"{field_name} must be a valid number")
+    
+    if id_int < 1:
+        raise ValidationError(f"{field_name} must be positive")
+    
+    return id_int
 
 if os.environ.get("FLASK_DEBUG") == "1":
     app.config.update(TEMPLATES_AUTO_RELOAD=True)
@@ -85,15 +155,21 @@ def summary():
 def product():
     with sqlite3.connect(DATABASE_NAME) as conn:
         if request.method == "POST":
-            prod_name, quantity = request.form["prod_name"], request.form["prod_quantity"]
-            transaction_allowed = prod_name not in EMPTY_SYMBOLS and quantity not in EMPTY_SYMBOLS
-
-            if transaction_allowed:
+            try:
+                # Validate inputs
+                prod_name = validate_name(request.form.get("prod_name"), "Product name")
+                quantity = validate_quantity(request.form.get("prod_quantity"), "Product quantity")
+                
                 conn.execute(
                     "INSERT INTO products (prod_name, prod_quantity) VALUES (?, ?)",
                     (prod_name, quantity),
                 )
                 return redirect(VIEWS["Stock"])
+                
+            except ValidationError as e:
+                flash(str(e), 'error')
+            except sqlite3.IntegrityError:
+                flash("Product name already exists", 'error')
 
         products = conn.execute("SELECT * FROM products").fetchall()
 
@@ -109,11 +185,17 @@ def product():
 def location():
     with sqlite3.connect(DATABASE_NAME) as conn:
         if request.method == "POST":
-            warehouse_name = request.form["warehouse_name"]
-
-            if warehouse_name not in EMPTY_SYMBOLS:
+            try:
+                # Validate input
+                warehouse_name = validate_name(request.form.get("warehouse_name"), "Warehouse name")
+                
                 conn.execute("INSERT INTO location (loc_name) VALUES (?)", (warehouse_name,))
                 return redirect(VIEWS["Warehouses"])
+                
+            except ValidationError as e:
+                flash(str(e), 'error')
+            except sqlite3.IntegrityError:
+                flash("Warehouse name already exists", 'error')
 
         warehouse_data = conn.execute("SELECT * FROM location").fetchall()
 
@@ -159,22 +241,34 @@ def update_warehouse_data(conn: sqlite3.Connection):
     ALLOWED_OPERATIONS = {"+", "-"}
     
     update_unallocated_quantity = False
-    prod_name, from_loc, to_loc, quantity = (
-        request.form["prod_name"],
-        request.form["from_loc"],
-        request.form["to_loc"],
-        request.form["quantity"],
-    )
+    
+    # Validate inputs
+    prod_name = validate_name(request.form.get("prod_name"), "Product name")
+    quantity = validate_quantity(request.form.get("quantity"), "Quantity")
+    
+    # Validate location names (can be empty for unallocated items)
+    from_loc = request.form.get("from_loc", "").strip()
+    to_loc = request.form.get("to_loc", "").strip()
+    
+    if from_loc and from_loc not in EMPTY_SYMBOLS:
+        from_loc = validate_name(from_loc, "From location")
+    else:
+        from_loc = None
+        
+    if to_loc and to_loc not in EMPTY_SYMBOLS:
+        to_loc = validate_name(to_loc, "To location")
+    else:
+        to_loc = None
 
     # if no 'from loc' is given, that means the product is being shipped to a warehouse (init condition)
-    if from_loc in EMPTY_SYMBOLS:
+    if from_loc is None:
         column_name = "to_loc_id"
         operation = "-"
         location_name = to_loc
         update_unallocated_quantity = True
 
     # To Location wasn't specified, will be unallocated
-    elif to_loc in EMPTY_SYMBOLS:
+    elif to_loc is None:
         column_name = "from_loc_id"
         operation = "+"
         location_name = from_loc
@@ -266,8 +360,12 @@ def movement():
 
         case "POST":
             with sqlite3.connect(DATABASE_NAME) as conn:
-                update_warehouse_data(conn)
-                return redirect(VIEWS["Logistics"])
+                try:
+                    update_warehouse_data(conn)
+                    return redirect(VIEWS["Logistics"])
+                except ValidationError as e:
+                    flash(str(e), 'error')
+                    return redirect(VIEWS["Logistics"])
 
 
 @app.route("/delete")
@@ -275,16 +373,15 @@ def delete():
     delete_record_type = request.args.get("type")
 
     with sqlite3.connect(DATABASE_NAME) as conn:
-        match delete_record_type:
-            case "product":
-                product_id = request.args.get("prod_id")
-                if product_id:
-                    conn.execute("DELETE FROM products WHERE prod_id = ?", product_id)
-                return redirect(VIEWS["Stock"])
+        try:
+            match delete_record_type:
+                case "product":
+                    product_id = validate_id(request.args.get("prod_id"), "Product ID")
+                    conn.execute("DELETE FROM products WHERE prod_id = ?", (product_id,))
+                    return redirect(VIEWS["Stock"])
 
-            case "location":
-                location_id = request.args.get("loc_id")
-                if location_id:
+                case "location":
+                    location_id = validate_id(request.args.get("loc_id"), "Location ID")
                     in_place = dict(
                         conn.execute(
                             "SELECT prod_id, SUM(prod_quantity) FROM logistics WHERE to_loc_id = ? GROUP BY prod_id",
@@ -308,11 +405,15 @@ def delete():
                             "UPDATE products SET unallocated_quantity = unallocated_quantity + ? WHERE prod_id = ?",
                             (displaced_qty[products_], products_),
                         )
-                    conn.execute("DELETE FROM location WHERE loc_id = ?", location_id)
-                return redirect(VIEWS["Warehouses"])
+                    conn.execute("DELETE FROM location WHERE loc_id = ?", (location_id,))
+                    return redirect(VIEWS["Warehouses"])
 
-            case _:
-                return redirect(VIEWS["Summary"])
+                case _:
+                    return redirect(VIEWS["Summary"])
+        
+        except ValidationError as e:
+            flash(str(e), 'error')
+            return redirect(VIEWS["Summary"])
 
 
 @app.route("/edit", methods=["POST"])
@@ -320,39 +421,62 @@ def edit():
     edit_record_type = request.args.get("type")
 
     with sqlite3.connect(DATABASE_NAME) as conn:
-        match edit_record_type:
-            case "location":
-                loc_id, loc_name = request.form["loc_id"], request.form["loc_name"]
-                if loc_name:
+        try:
+            match edit_record_type:
+                case "location":
+                    loc_id = validate_id(request.form.get("loc_id"), "Location ID")
+                    loc_name = validate_name(request.form.get("loc_name"), "Location name")
+                    
                     conn.execute(
                         "UPDATE location SET loc_name = ? WHERE loc_id = ?", (loc_name, loc_id)
                     )
+                    return redirect(VIEWS["Warehouses"])
+
+                case "product":
+                    prod_id = validate_id(request.form.get("prod_id"), "Product ID")
+                    
+                    prod_name_input = request.form.get("prod_name")
+                    prod_quantity_input = request.form.get("prod_quantity")
+                    
+                    if prod_name_input:
+                        prod_name = validate_name(prod_name_input, "Product name")
+                        conn.execute(
+                            "UPDATE products SET prod_name = ? WHERE prod_id = ?",
+                            (prod_name, prod_id),
+                        )
+                    
+                    if prod_quantity_input:
+                        prod_quantity = validate_quantity(prod_quantity_input, "Product quantity")
+                        old_prod_quantity = conn.execute(
+                            "SELECT prod_quantity FROM products WHERE prod_id = ?", (prod_id,)
+                        ).fetchone()[0]
+                        conn.execute(
+                            "UPDATE products SET prod_quantity = ?, unallocated_quantity =  unallocated_quantity + ? - ? WHERE prod_id = ?",
+                            (prod_quantity, prod_quantity, old_prod_quantity, prod_id),
+                        )
+
+                    return redirect(VIEWS["Stock"])
+
+                case _:
+                    return redirect(VIEWS["Summary"])
+        
+        except ValidationError as e:
+            flash(str(e), 'error')
+            # Redirect based on the edit type
+            if edit_record_type == "location":
                 return redirect(VIEWS["Warehouses"])
-
-            case "product":
-                prod_id, prod_name, prod_quantity = (
-                    request.form["prod_id"],
-                    request.form["prod_name"],
-                    request.form["prod_quantity"],
-                )
-
-                if prod_name:
-                    conn.execute(
-                        "UPDATE products SET prod_name = ? WHERE prod_id = ?",
-                        (prod_name, prod_id),
-                    )
-                if prod_quantity:
-                    old_prod_quantity = conn.execute(
-                        "SELECT prod_quantity FROM products WHERE prod_id = ?", (prod_id,)
-                    ).fetchone()[0]
-                    conn.execute(
-                        "UPDATE products SET prod_quantity = ?, unallocated_quantity =  unallocated_quantity + ? - ? WHERE prod_id = ?",
-                        (prod_quantity, prod_quantity, old_prod_quantity, prod_id),
-                    )
-
+            elif edit_record_type == "product":
                 return redirect(VIEWS["Stock"])
-
-            case _:
+            else:
+                return redirect(VIEWS["Summary"])
+        except sqlite3.IntegrityError:
+            flash("Name already exists", 'error')
+            # Redirect based on the edit type
+            if edit_record_type == "location":
+                return redirect(VIEWS["Warehouses"])
+            elif edit_record_type == "product":
+                return redirect(VIEWS["Stock"])
+            else:
                 return redirect(VIEWS["Summary"])
 
 
