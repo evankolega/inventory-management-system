@@ -1,12 +1,15 @@
 # imports - standard imports
+import functools
+import hashlib
 import json
 import os
+import secrets
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
 # imports - third party imports
-from flask import Flask, redirect, render_template, request
+from flask import Flask, redirect, render_template, request, session, url_for
 
 DATABASE_NAME = "inventory.sqlite"
 _DATABASE_PATH = Path(__file__).parent.parent / DATABASE_NAME
@@ -19,12 +22,34 @@ VIEWS = {
 EMPTY_SYMBOLS = {"", " ", None}
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 
 if os.environ.get("FLASK_DEBUG") == "1":
     app.config.update(TEMPLATES_AUTO_RELOAD=True)
     DATABASE_NAME = _DATABASE_PATH.resolve()
 else:
     DATABASE_NAME = os.environ.get("DATABASE_NAME") or _DATABASE_PATH.resolve()
+
+
+def hash_password(password: str) -> str:
+    """Hash a password using SHA-256 with a salt."""
+    salt = os.environ.get("PASSWORD_SALT", "inventory_default_salt")
+    return hashlib.sha256((salt + password).encode()).hexdigest()
+
+
+def check_auth() -> bool:
+    """Check if user is authenticated via session."""
+    return session.get("authenticated", False)
+
+
+def login_required(f):
+    """Decorator to require authentication for a route."""
+    @functools.wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not check_auth():
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def init_database():
@@ -62,7 +87,39 @@ def init_database():
 app.init_db = init_database
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+
+        # Get credentials from environment variables
+        valid_username = os.environ.get("INVENTORY_USERNAME", "admin")
+        valid_password_hash = os.environ.get("INVENTORY_PASSWORD_HASH")
+
+        # If no password hash is set, use a default (should be changed in production)
+        if valid_password_hash is None:
+            valid_password_hash = hash_password("admin")
+
+        if username == valid_username and hash_password(password) == valid_password_hash:
+            session["authenticated"] = True
+            session["username"] = username
+            return redirect(url_for("summary"))
+        else:
+            error = "Invalid credentials"
+
+    return render_template("login.jinja", title="Login", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/", methods=["GET"])
+@login_required
 def summary():
     with sqlite3.connect(DATABASE_NAME) as conn:
         warehouse = conn.execute("SELECT * FROM location").fetchall()
@@ -82,6 +139,7 @@ def summary():
 
 
 @app.route("/product", methods=["POST", "GET"])
+@login_required
 def product():
     with sqlite3.connect(DATABASE_NAME) as conn:
         if request.method == "POST":
@@ -106,6 +164,7 @@ def product():
 
 
 @app.route("/location", methods=["POST", "GET"])
+@login_required
 def location():
     with sqlite3.connect(DATABASE_NAME) as conn:
         if request.method == "POST":
@@ -242,6 +301,7 @@ def get_warehouse_map(log_summary: list):
 
 
 @app.route("/movement", methods=["POST", "GET"])
+@login_required
 def movement():
     match request.method:
         case "GET":
@@ -271,6 +331,7 @@ def movement():
 
 
 @app.route("/delete")
+@login_required
 def delete():
     delete_record_type = request.args.get("type")
 
@@ -316,6 +377,7 @@ def delete():
 
 
 @app.route("/edit", methods=["POST"])
+@login_required
 def edit():
     edit_record_type = request.args.get("type")
 
