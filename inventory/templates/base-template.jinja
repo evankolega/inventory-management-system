@@ -53,6 +53,9 @@
                   <button class="btn btn-primary" onclick="location.href='{{ v }}'" {{ 'disabled' if k == title }}>{{ k }}</button>
                 </div>
                 {% endfor %}
+                <div class="col-auto">
+                  <button class="btn btn-outline-light" onclick="location.href='{{ url_for('logout') }}'">Logout</button>
+                </div>
             </div>
 	    </nav>
         {% block content %}
