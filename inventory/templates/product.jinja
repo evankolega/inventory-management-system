@@ -12,9 +12,11 @@
                 <tr>
                     <td>{{ product[0] }}</td><td>{{ product[1] }}</td><td>{{ product[2] }}</td>
                     <td>
-                        <a href="{{ url_for('delete', prod_id=product[0], type='product') }}">
-                            <button name="button" type="button" class="btn btn-danger" value= "delete" >delete</button><br>
-                        </a>
+                        <form method="post" action="{{ url_for('delete') }}" style="display:inline;">
+                            <input type="hidden" name="type" value="product">
+                            <input type="hidden" name="prod_id" value="{{ product[0] }}">
+                            <button type="submit" class="btn btn-danger">delete</button>
+                        </form>
                     </td>
                     <td>
                         <button name="button" type="button" class="btn btn-success" value= "edit" data-toggle="modal" data-target="#edit_{{ product[0] }}" >edit</button><br>

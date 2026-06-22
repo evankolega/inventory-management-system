@@ -3,10 +3,13 @@ import json
 import os
 import sqlite3
 from collections import defaultdict
+from functools import wraps
 from pathlib import Path
+from urllib.parse import urlparse
 
 # imports - third party imports
-from flask import Flask, redirect, render_template, request
+from flask import Flask, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash
 
 DATABASE_NAME = "inventory.sqlite"
 _DATABASE_PATH = Path(__file__).parent.parent / DATABASE_NAME
@@ -20,11 +23,60 @@ EMPTY_SYMBOLS = {"", " ", None}
 
 app = Flask(__name__)
 
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "SECRET_KEY environment variable is required. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
+app.secret_key = SECRET_KEY
+
+ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
+
 if os.environ.get("FLASK_DEBUG") == "1":
     app.config.update(TEMPLATES_AUTO_RELOAD=True)
     DATABASE_NAME = _DATABASE_PATH.resolve()
 else:
     DATABASE_NAME = os.environ.get("DATABASE_NAME") or _DATABASE_PATH.resolve()
+
+
+def _is_safe_redirect(target: str) -> bool:
+    if not target:
+        return False
+    parsed = urlparse(target)
+    return not parsed.scheme and not parsed.netloc and target.startswith("/")
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("authenticated"):
+            return redirect(url_for("login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        if not ADMIN_PASSWORD_HASH:
+            return "Authentication is not configured.", 503
+        password = request.form.get("password", "")
+        if check_password_hash(ADMIN_PASSWORD_HASH, password):
+            session.clear()
+            session["authenticated"] = True
+            next_url = request.args.get("next", "")
+            return redirect(next_url if _is_safe_redirect(next_url) else VIEWS["Summary"])
+        error = "Invalid password."
+    else:
+        error = None
+    return render_template("login.jinja", link=VIEWS, title="Login", error=error)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 def init_database():
@@ -270,20 +322,21 @@ def movement():
                 return redirect(VIEWS["Logistics"])
 
 
-@app.route("/delete")
+@app.route("/delete", methods=["POST"])
+@login_required
 def delete():
-    delete_record_type = request.args.get("type")
+    delete_record_type = request.form.get("type")
 
     with sqlite3.connect(DATABASE_NAME) as conn:
         match delete_record_type:
             case "product":
-                product_id = request.args.get("prod_id")
+                product_id = request.form.get("prod_id")
                 if product_id:
                     conn.execute("DELETE FROM products WHERE prod_id = ?", product_id)
                 return redirect(VIEWS["Stock"])
 
             case "location":
-                location_id = request.args.get("loc_id")
+                location_id = request.form.get("loc_id")
                 if location_id:
                     in_place = dict(
                         conn.execute(
@@ -316,6 +369,7 @@ def delete():
 
 
 @app.route("/edit", methods=["POST"])
+@login_required
 def edit():
     edit_record_type = request.args.get("type")
 

@@ -8,9 +8,11 @@
             <tr>
                 <td>{{ location[0] }}</td><td>{{ location[1] }}</td>
                 <td>
-                    <a href="{{ url_for('delete', loc_id=location[0], type='location') }}">
-                        <button name="button" type="button" class="btn btn-danger" value="delete">delete</button><br>
-                    </a>
+                    <form method="post" action="{{ url_for('delete') }}" style="display:inline;">
+                        <input type="hidden" name="type" value="location">
+                        <input type="hidden" name="loc_id" value="{{ location[0] }}">
+                        <button type="submit" class="btn btn-danger">delete</button>
+                    </form>
                 </td>
                 <td>
                     <button name="button" type="button" class="btn btn-success" value="edit" data-toggle="modal" data-target="#edit_{{ location[0] }}">edit</button><br>
