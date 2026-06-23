@@ -72,7 +72,7 @@ def summary():
         ).fetchall()
 
     return render_template(
-        "index.jinja",
+        "index.html",
         link=VIEWS,
         title="Summary",
         warehouses=warehouse,
@@ -98,7 +98,7 @@ def product():
         products = conn.execute("SELECT * FROM products").fetchall()
 
     return render_template(
-        "product.jinja",
+        "product.html",
         link=VIEWS,
         products=products,
         title="Stock",
@@ -118,7 +118,7 @@ def location():
         warehouse_data = conn.execute("SELECT * FROM location").fetchall()
 
     return render_template(
-        "location.jinja",
+        "location.html",
         link=VIEWS,
         warehouses=warehouse_data,
         title="Warehouses",
@@ -254,7 +254,7 @@ def movement():
                 warehouse_summary = get_warehouse_data(conn, products, locations)
                 item_location_qty_map = get_warehouse_map(warehouse_summary)
                 return render_template(
-                    "movement.jinja",
+                    "movement.html",
                     title="Logistics",
                     link=VIEWS,
                     products=products,
